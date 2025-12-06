@@ -2,7 +2,7 @@
 
 A premium **AAA-class multi-tenant Shopify analytics platform** built with Next.js 15, featuring enterprise-grade architecture, real-time data synchronization, and a stunning Apple/Nike-inspired UI.
 
-## 🌟 Features
+## Features
 
 - **Multi-tenant Architecture**: Secure tenant isolation with PostgreSQL and Row-Level Security
 - **Real-time Sync**: Automatic data synchronization via Shopify webhooks and scheduled cron jobs
@@ -12,7 +12,7 @@ A premium **AAA-class multi-tenant Shopify analytics platform** built with Next.
 - **Type-safe**: Full TypeScript with Prisma ORM
 - **Production-ready**: Optimized for Vercel deployment with edge functions
 
-## 🏗️ Tech Stack
+## Tech Stack
 
 - **Frontend**: Next.js 15, React, TailwindCSS, Framer Motion
 - **Backend**: Next.js API Routes, Prisma ORM, PostgreSQL
@@ -21,7 +21,7 @@ A premium **AAA-class multi-tenant Shopify analytics platform** built with Next.
 - **Charts**: Recharts for data visualization
 - **Deployment**: Vercel with cron jobs
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -259,7 +259,7 @@ The platform features a premium design inspired by Apple and Nike:
 └── package.json
 ```
 
-## 🛠️ Development
+## Development
 
 ### Database Migrations
 
@@ -267,7 +267,7 @@ The platform features a premium design inspired by Apple and Nike:
 # Create a migration
 npx prisma migrate dev --name your_migration_name
 
-# Reset database (⚠️ deletes all data)
+# Reset database ( deletes all data)
 npx prisma migrate reset
 
 # View data in Prisma Studio
@@ -294,7 +294,7 @@ curl -X POST http://localhost:3000/api/tenants \
   }'
 ```
 
-## 🎯 Roadmap
+## Roadmap
 
 - [ ] Add product management UI
 - [ ] Implement customer detail pages
@@ -306,18 +306,18 @@ curl -X POST http://localhost:3000/api/tenants \
 - [ ] Create mobile app
 - [ ] Add AI-powered insights
 
-## 📄 License
+## License
 
 MIT License - feel free to use this project for commercial or personal use.
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-## 📞 Support
+## Support
 
 For issues or questions, please open an issue on GitHub.
 
 ---
 
-Built with ❤️ using Next.js, Prisma, and modern web technologies.
+Built with using Next.js, Prisma, and modern web technologies.
