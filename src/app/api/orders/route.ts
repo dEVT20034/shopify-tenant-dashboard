@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import prisma from "@/lib/prisma";
+import { db } from "@/db";
+import { orders, customers } from "@/db/schema";
+import { eq, like, or, desc, count } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
   try {
@@ -18,39 +20,54 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get("limit") || "20");
     const search = searchParams.get("search") || "";
 
-    const skip = (page - 1) * limit;
+    const offset = (page - 1) * limit;
 
-    const where = {
-      tenantId,
-      ...(search && {
-        OR: [
-          { orderNumber: { contains: search, mode: "insensitive" as const } },
-          { customerEmail: { contains: search, mode: "insensitive" as const } },
-        ],
-      }),
-    };
+    // Build where conditions
+    const whereConditions = search
+      ? or(
+          like(orders.orderNumber, `%${search}%`),
+          like(orders.customerEmail, `%${search}%`)
+        )
+      : undefined;
 
-    const [orders, total] = await Promise.all([
-      prisma.order.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { orderCreatedAt: "desc" },
-        include: {
-          customer: {
-            select: {
-              firstName: true,
-              lastName: true,
-              email: true,
-            },
-          },
+    // Get orders with customer info
+    const ordersList = await db
+      .select({
+        id: orders.id,
+        shopifyOrderId: orders.shopifyOrderId,
+        orderNumber: orders.orderNumber,
+        customerEmail: orders.customerEmail,
+        totalPrice: orders.totalPrice,
+        status: orders.status,
+        financialStatus: orders.financialStatus,
+        orderCreatedAt: orders.orderCreatedAt,
+        createdAt: orders.createdAt,
+        customerId: orders.customerId,
+        customer: {
+          firstName: customers.firstName,
+          lastName: customers.lastName,
+          email: customers.email,
         },
-      }),
-      prisma.order.count({ where }),
-    ]);
+      })
+      .from(orders)
+      .leftJoin(customers, eq(orders.customerId, customers.id))
+      .where(eq(orders.tenantId, tenantId))
+      .where(whereConditions)
+      .orderBy(desc(orders.orderCreatedAt))
+      .limit(limit)
+      .offset(offset);
+
+    // Get total count
+    const [totalResult] = await db
+      .select({ count: count() })
+      .from(orders)
+      .where(eq(orders.tenantId, tenantId))
+      .where(whereConditions);
+
+    const total = totalResult.count;
 
     return NextResponse.json({
-      orders,
+      orders: ordersList,
       pagination: {
         page,
         limit,

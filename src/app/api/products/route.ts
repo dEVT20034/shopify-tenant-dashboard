@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import prisma from "@/lib/prisma";
+import { db } from "@/db";
+import { products } from "@/db/schema";
+import { eq, like, or, desc, count } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
   try {
@@ -18,31 +20,36 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get("limit") || "20");
     const search = searchParams.get("search") || "";
 
-    const skip = (page - 1) * limit;
+    const offset = (page - 1) * limit;
 
-    const where = {
-      tenantId,
-      ...(search && {
-        OR: [
-          { title: { contains: search, mode: "insensitive" as const } },
-          { vendor: { contains: search, mode: "insensitive" as const } },
-          { productType: { contains: search, mode: "insensitive" as const } },
-        ],
-      }),
-    };
+    // Build where conditions
+    const whereConditions = search
+      ? or(
+          like(products.title, `%${search}%`)
+        )
+      : undefined;
 
-    const [products, total] = await Promise.all([
-      prisma.product.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.product.count({ where }),
-    ]);
+    // Get products with search and pagination
+    const productsList = await db
+      .select()
+      .from(products)
+      .where(eq(products.tenantId, tenantId))
+      .where(whereConditions)
+      .orderBy(desc(products.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    // Get total count
+    const [totalResult] = await db
+      .select({ count: count() })
+      .from(products)
+      .where(eq(products.tenantId, tenantId))
+      .where(whereConditions);
+
+    const total = totalResult.count;
 
     return NextResponse.json({
-      products,
+      products: productsList,
       pagination: {
         page,
         limit,

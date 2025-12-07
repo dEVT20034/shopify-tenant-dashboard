@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import { db } from "@/db";
+import { tenants, products, customers, orders } from "@/db/schema";
+import { eq, and, isNotNull } from "drizzle-orm";
 import { createShopifyClient } from "@/lib/shopify";
 
 export async function POST(req: NextRequest) {
   try {
-    // Get all tenants
-    const tenants = await prisma.tenant.findMany({
-      where: {
-        shopifyAccessToken: { not: null },
-      },
-    });
+    // Get all tenants with access tokens
+    const tenantsList = await db
+      .select()
+      .from(tenants)
+      .where(isNotNull(tenants.shopifyAccessToken));
 
     const results = [];
 
-    for (const tenant of tenants) {
+    for (const tenant of tenantsList) {
       try {
         if (!tenant.shopifyAccessToken) continue;
 
@@ -28,42 +29,43 @@ export async function POST(req: NextRequest) {
           query: { limit: "250" },
         });
 
-        const products = (productsResponse.body as any).products || [];
+        const productsData = (productsResponse.body as any).products || [];
         
-        for (const product of products) {
+        for (const product of productsData) {
           const firstVariant = product.variants?.[0];
-          await prisma.product.upsert({
-            where: {
-              shopifyProductId_tenantId: {
-                shopifyProductId: product.id.toString(),
-                tenantId: tenant.id,
-              },
-            },
-            update: {
-              title: product.title,
-              description: product.body_html,
-              price: firstVariant?.price ? parseFloat(firstVariant.price) : 0,
-              compareAtPrice: firstVariant?.compare_at_price ? parseFloat(firstVariant.compare_at_price) : null,
-              inventory: firstVariant?.inventory_quantity || 0,
-              imageUrl: product.image?.src || product.images?.[0]?.src,
-              vendor: product.vendor,
-              productType: product.product_type,
-              tags: product.tags?.split(",").map((t: string) => t.trim()) || [],
-            },
-            create: {
-              shopifyProductId: product.id.toString(),
-              title: product.title,
-              description: product.body_html,
-              price: firstVariant?.price ? parseFloat(firstVariant.price) : 0,
-              compareAtPrice: firstVariant?.compare_at_price ? parseFloat(firstVariant.compare_at_price) : null,
-              inventory: firstVariant?.inventory_quantity || 0,
-              imageUrl: product.image?.src || product.images?.[0]?.src,
-              vendor: product.vendor,
-              productType: product.product_type,
-              tags: product.tags?.split(",").map((t: string) => t.trim()) || [],
-              tenantId: tenant.id,
-            },
-          });
+          const shopifyProductId = product.id.toString();
+
+          const [existingProduct] = await db
+            .select()
+            .from(products)
+            .where(
+              and(
+                eq(products.shopifyProductId, shopifyProductId),
+                eq(products.tenantId, tenant.id)
+              )
+            )
+            .limit(1);
+
+          const productRecord = {
+            shopifyProductId,
+            title: product.title || "",
+            price: firstVariant?.price ? parseFloat(firstVariant.price) : 0,
+            inventory: firstVariant?.inventory_quantity || 0,
+            tenantId: tenant.id,
+            updatedAt: new Date().toISOString(),
+          };
+
+          if (existingProduct) {
+            await db
+              .update(products)
+              .set(productRecord)
+              .where(eq(products.id, existingProduct.id));
+          } else {
+            await db.insert(products).values({
+              ...productRecord,
+              createdAt: new Date().toISOString(),
+            });
+          }
         }
 
         // Sync orders (last 250)
@@ -72,87 +74,96 @@ export async function POST(req: NextRequest) {
           query: { limit: "250", status: "any" },
         });
 
-        const orders = (ordersResponse.body as any).orders || [];
+        const ordersData = (ordersResponse.body as any).orders || [];
 
-        for (const order of orders) {
-          let customerId: string | null = null;
+        for (const order of ordersData) {
+          let customerId: number | null = null;
           
           if (order.customer) {
-            const customer = await prisma.customer.upsert({
-              where: {
-                shopifyCustomerId_tenantId: {
-                  shopifyCustomerId: order.customer.id.toString(),
-                  tenantId: tenant.id,
-                },
-              },
-              update: {
-                email: order.customer.email,
-                firstName: order.customer.first_name,
-                lastName: order.customer.last_name,
-                phone: order.customer.phone,
-                totalSpent: parseFloat(order.customer.total_spent || "0"),
-                ordersCount: order.customer.orders_count || 0,
-              },
-              create: {
-                shopifyCustomerId: order.customer.id.toString(),
-                email: order.customer.email,
-                firstName: order.customer.first_name,
-                lastName: order.customer.last_name,
-                phone: order.customer.phone,
-                totalSpent: parseFloat(order.customer.total_spent || "0"),
-                ordersCount: order.customer.orders_count || 0,
-                tenantId: tenant.id,
-              },
-            });
-            customerId = customer.id;
+            const shopifyCustomerId = order.customer.id.toString();
+            
+            const [existingCustomer] = await db
+              .select()
+              .from(customers)
+              .where(
+                and(
+                  eq(customers.shopifyCustomerId, shopifyCustomerId),
+                  eq(customers.tenantId, tenant.id)
+                )
+              )
+              .limit(1);
+
+            const customerRecord = {
+              shopifyCustomerId,
+              email: order.customer.email || "",
+              name: `${order.customer.first_name || ""} ${order.customer.last_name || ""}`.trim(),
+              firstName: order.customer.first_name,
+              lastName: order.customer.last_name,
+              totalSpent: parseFloat(order.customer.total_spent || "0"),
+              ordersCount: order.customer.orders_count || 0,
+              tenantId: tenant.id,
+              updatedAt: new Date().toISOString(),
+            };
+
+            if (existingCustomer) {
+              await db
+                .update(customers)
+                .set(customerRecord)
+                .where(eq(customers.id, existingCustomer.id));
+              customerId = existingCustomer.id;
+            } else {
+              const [newCustomer] = await db.insert(customers).values({
+                ...customerRecord,
+                createdAt: new Date().toISOString(),
+              }).returning();
+              customerId = newCustomer.id;
+            }
           }
 
-          await prisma.order.upsert({
-            where: {
-              shopifyOrderId_tenantId: {
-                shopifyOrderId: order.id.toString(),
-                tenantId: tenant.id,
-              },
-            },
-            update: {
-              orderNumber: order.order_number?.toString(),
-              customerEmail: order.email,
-              totalPrice: parseFloat(order.total_price || "0"),
-              subtotalPrice: parseFloat(order.subtotal_price || "0"),
-              totalTax: parseFloat(order.total_tax || "0"),
-              currency: order.currency || "USD",
-              financialStatus: order.financial_status,
-              fulfillmentStatus: order.fulfillment_status,
-              lineItems: order.line_items || [],
-              shippingAddress: order.shipping_address || null,
-              billingAddress: order.billing_address || null,
-              orderCreatedAt: new Date(order.created_at),
-            },
-            create: {
-              shopifyOrderId: order.id.toString(),
-              orderNumber: order.order_number?.toString(),
-              customerId,
-              customerEmail: order.email,
-              totalPrice: parseFloat(order.total_price || "0"),
-              subtotalPrice: parseFloat(order.subtotal_price || "0"),
-              totalTax: parseFloat(order.total_tax || "0"),
-              currency: order.currency || "USD",
-              financialStatus: order.financial_status,
-              fulfillmentStatus: order.fulfillment_status,
-              lineItems: order.line_items || [],
-              shippingAddress: order.shipping_address || null,
-              billingAddress: order.billing_address || null,
-              tenantId: tenant.id,
-              orderCreatedAt: new Date(order.created_at),
-            },
-          });
+          const shopifyOrderId = order.id.toString();
+          
+          const [existingOrder] = await db
+            .select()
+            .from(orders)
+            .where(
+              and(
+                eq(orders.shopifyOrderId, shopifyOrderId),
+                eq(orders.tenantId, tenant.id)
+              )
+            )
+            .limit(1);
+
+          const orderRecord = {
+            shopifyOrderId,
+            orderNumber: order.order_number?.toString(),
+            customerId,
+            customerEmail: order.email,
+            totalPrice: parseFloat(order.total_price || "0"),
+            status: order.financial_status || "pending",
+            financialStatus: order.financial_status,
+            orderCreatedAt: new Date(order.created_at).toISOString(),
+            tenantId: tenant.id,
+            updatedAt: new Date().toISOString(),
+          };
+
+          if (existingOrder) {
+            await db
+              .update(orders)
+              .set(orderRecord)
+              .where(eq(orders.id, existingOrder.id));
+          } else {
+            await db.insert(orders).values({
+              ...orderRecord,
+              createdAt: new Date().toISOString(),
+            });
+          }
         }
 
         results.push({
           tenantId: tenant.id,
           tenantName: tenant.name,
-          productsSync: products.length,
-          ordersSync: orders.length,
+          productsSync: productsData.length,
+          ordersSync: ordersData.length,
           success: true,
         });
       } catch (error) {

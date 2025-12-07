@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import prisma from "@/lib/prisma";
+import { db } from "@/db";
+import { orders } from "@/db/schema";
+import { eq, gte } from "drizzle-orm";
 import { subDays, startOfDay, format } from "date-fns";
 
 export async function GET(req: NextRequest) {
@@ -20,26 +22,21 @@ export async function GET(req: NextRequest) {
 
     // Get orders from last N days
     const startDate = startOfDay(subDays(new Date(), days));
+    const startDateString = startDate.toISOString();
 
-    const orders = await prisma.order.findMany({
-      where: {
-        tenantId,
-        orderCreatedAt: {
-          gte: startDate,
-        },
-      },
-      select: {
-        orderCreatedAt: true,
-        totalPrice: true,
-      },
-      orderBy: {
-        orderCreatedAt: "asc",
-      },
-    });
+    const ordersList = await db
+      .select({
+        orderCreatedAt: orders.orderCreatedAt,
+        totalPrice: orders.totalPrice,
+      })
+      .from(orders)
+      .where(eq(orders.tenantId, tenantId))
+      .where(gte(orders.orderCreatedAt, startDateString))
+      .orderBy(orders.orderCreatedAt);
 
     // Group by day
-    const groupedData = orders.reduce((acc, order) => {
-      const date = format(order.orderCreatedAt, "MMM dd");
+    const groupedData = ordersList.reduce((acc, order) => {
+      const date = format(new Date(order.orderCreatedAt), "MMM dd");
       if (!acc[date]) {
         acc[date] = {
           date,
