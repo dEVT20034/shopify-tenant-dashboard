@@ -4,5 +4,11 @@
       "path": "/api/shopify/sync",
       "schedule": "0 */6 * * *"
     }
-  ]
+  ],
+  "build": {
+    "env": {
+      "SKIP_ENV_VALIDATION": "1",
+      "PRISMA_SKIP_POSTINSTALL": "1"
+    }
+  }
 }
